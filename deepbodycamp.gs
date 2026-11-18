@@ -53,9 +53,7 @@ const PAY_SHEET = 'Счета';
 const LOG_SHEET = 'Лог';
 
 const REG_EMAIL_COL = 3;         // C
-const REG_ACCESS_COL = 4;        // D
 const REG_PAY_COL = 5;           // E
-const ACCESS_EARLIER = 'Доступ выдан ранее';
 const REG_PAY_HEADER = 'Оплата';
 const PAY_YES = 'Успешно';
 const PAY_NO = 'Нет оплаты';
@@ -289,7 +287,7 @@ function getOrCreateInvoice(email, uid, offerId, currency, promo, tid) {
     const data = JSON.parse(text);
     if (!data.paymentUrl) throw new Error('Lava не вернула ссылку на оплату: ' + text.slice(0, 300));
     const money = data.amountTotal || {};
-    sheet.appendRow([new Date(), uid, email, offerId, money.amount != null && money.amount !== '' ? Number(money.amount) : '', String(money.currency || currency),
+    sheet.appendRow([new Date(), uid, email, offerId, Number(money.amount) || '', String(money.currency || currency),
                      data.id, 'ожидает оплаты', data.paymentUrl, promo, tid ? "'" + tid : '', '']);
     return { id: data.id, paymentUrl: data.paymentUrl };
   } finally {
@@ -392,8 +390,7 @@ function deliverAccess() {
     rows.forEach(function (r) {
       const t = tariffByOffer(r[3]);
       const tid = String(r[P_TID - 1] || '').replace(/^'/, '');
-      // запоминаем тариф, по которому команда ушла впервые
-      if (t && /^отправлено \d/.test(String(r[P_SENT - 1])) && !done[key(tid, t.command)]) done[key(tid, t.command)] = t.name;
+      if (t && String(r[P_SENT - 1]).indexOf('отправлено') === 0) done[key(tid, t.command)] = true;
     });
     rows.forEach(function (r, i) {
       const tid = String(r[P_TID - 1] || '').replace(/^'/, '');
@@ -408,14 +405,14 @@ function deliverAccess() {
       }
       if (t.command.indexOf('ВСТАВЬТЕ') === 0) return;   // команда этого тарифа ещё не вписана
       if (done[key(tid, t.command)]) {
-        sheet.getRange(i + 2, P_SENT).setValue('отправлено ранее (' + done[key(tid, t.command)] + ')');
+        sheet.getRange(i + 2, P_SENT).setValue('отправлено ранее');
         return;
       }
       const res = puzzleSendCommand(tid, t.command);
       if (res.ok) {
         sheet.getRange(i + 2, P_SENT).setValue('отправлено ' +
           Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd.MM HH:mm') + ' — ' + t.command);
-        done[key(tid, t.command)] = t.name;
+        done[key(tid, t.command)] = true;
         sent++;
       } else {
         sheet.getRange(i + 2, P_SENT).setValue('ошибка ' + (tries + 1) + '/3: ' + res.error);
@@ -425,51 +422,7 @@ function deliverAccess() {
     lock.releaseLock();
   }
   if (sent) writeLog(null, 'BOT', { status: 'access_sent', count: sent });
-  markAccessEarlier();
   return sent;
-}
-
-/**
- * Если команда не отправлялась, потому что этот человек уже получил такой доступ раньше
- * («отправлено ранее» на листе «Счета»), на листе его тарифа в пустом столбце D «Доступ»
- * пишем «Доступ выдан ранее (3300)». Строку ищем по почте, а если не нашли — по тегу Telegram.
- */
-function markAccessEarlier() {
-  const pay = paySheet();
-  const last = pay.getLastRow();
-  if (last < 2) return;
-  const rows = pay.getRange(2, 1, last - 1, PAY_HEADER.length).getValues();
-  const ss = SpreadsheetApp.getActive();
-  const cache = {};
-  rows.forEach(function (r) {
-    const mark = String(r[P_SENT - 1] || '');
-    if (mark.indexOf('отправлено ранее') !== 0) return;
-    const t = tariffByOffer(r[3]);
-    if (!t) return;
-    let earlier = (mark.match(/\((.+)\)/) || [])[1] || '';
-    if (!earlier) {
-      // старая пометка без тарифа — находим, по какому тарифу команда ушла впервые
-      const tid = String(r[P_TID - 1] || '').replace(/^'/, '');
-      rows.some(function (x) {
-        const xt = tariffByOffer(x[3]);
-        if (xt && xt.command === t.command && String(x[P_TID - 1] || '').replace(/^'/, '') === tid &&
-            /^отправлено \d/.test(String(x[P_SENT - 1]))) { earlier = xt.name; return true; }
-        return false;
-      });
-    }
-    const reg = ss.getSheetByName(t.sheet);
-    if (!reg || reg.getLastRow() < 2) return;
-    if (!cache[t.sheet]) cache[t.sheet] = reg.getRange(2, 1, reg.getLastRow() - 1, REG_ACCESS_COL).getValues();
-    const regRows = cache[t.sheet];
-    const email = normEmail(r[2]);
-    const tag = normTag(r[1]);
-    let at = regRows.findIndex(function (x) { return email && normEmail(x[REG_EMAIL_COL - 1]) === email; });
-    if (at < 0) at = regRows.findIndex(function (x) { return tag && normTag(x[1]) === tag; });
-    if (at < 0 || String(regRows[at][REG_ACCESS_COL - 1] || '').trim()) return;
-    const text = ACCESS_EARLIER + (earlier ? ' (' + earlier + ')' : '');
-    reg.getRange(at + 2, REG_ACCESS_COL).setValue(text);
-    regRows[at][REG_ACCESS_COL - 1] = text;
-  });
 }
 
 function puzzleSendCommand(tid, command) {
