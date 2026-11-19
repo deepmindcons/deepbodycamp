@@ -43,10 +43,10 @@ const COMMAND_REC = 'ВСТАВЬТЕ_КОМАНДУ_С_ЗАПИСЯМИ';      
 const SHEET_NO_REC = 'Без записей';
 const SHEET_REC = 'С записями';
 const TARIFFS = [
-  { name: '2500', offer: 'ВСТАВЬТЕ_ID_ЦЕНЫ_2500', sheet: SHEET_NO_REC, command: COMMAND_NO_REC },
-  { name: '3500', offer: 'ВСТАВЬТЕ_ID_ЦЕНЫ_3500', sheet: SHEET_REC, command: COMMAND_REC },
-  { name: '4500', offer: 'ВСТАВЬТЕ_ID_ЦЕНЫ_4500', sheet: SHEET_REC, command: COMMAND_REC },
-  { name: '5500', offer: 'ВСТАВЬТЕ_ID_ЦЕНЫ_5500', sheet: SHEET_REC, command: COMMAND_REC },
+  { name: '2500', offer: '1a49501b-ff80-40da-8841-de64f310d9b4', sheet: SHEET_NO_REC, command: COMMAND_NO_REC },
+  { name: '3500', offer: '5ba3f4cf-ebd4-428f-b31e-c4ef11acda4a', sheet: SHEET_REC, command: COMMAND_REC },
+  { name: '4500', offer: '111ca105-a35c-457a-a2d0-f2fa543f413e', sheet: SHEET_REC, command: COMMAND_REC },
+  { name: '5500', offer: '87a95f6d-e01c-4ea6-9218-b06becbccd1a', sheet: SHEET_REC, command: COMMAND_REC },
 ];
 const DEFAULT_OFFER_ID = TARIFFS[0].offer;
 

@@ -24,7 +24,7 @@
 2. Вверху скрипта вписать `LAVA_API_KEY`, `PUZZLEBOT_TOKEN` и названия команд бота
    `COMMAND_NO_REC` (2300) и `COMMAND_REC` (3300, 4300).
    Ключ, токен и названия команд вписываются только в Apps Script — в GitHub их не храним.
-   ID цен четырёх тарифов вписаны в `TARIFFS`.
+   ID цен четырёх тарифов вписаны в `TARIFFS` (продукт Lava `ada2eaaa-a138-4b80-abaf-690d6449615f`).
 3. Развернуть как веб-приложение (запуск от моего имени, доступ — все), адрес `/exec`
    вписать в `SCRIPT_URL` в `docs/index.html`.
 4. Меню «Lava» → «1. Включить автопроверку».
@@ -33,15 +33,15 @@
 
 | Тариф | Ссылка |
 |---|---|
-| 2500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{EMAIL_БЕЗ_ЗАПИСЕЙ}}&offer=ID_ЦЕНЫ_2500` |
-| 3500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{EMAIL_С_ЗАПИСЯМИ}}&offer=ID_ЦЕНЫ_3500` |
-| 4500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{EMAIL_С_ЗАПИСЯМИ}}&offer=ID_ЦЕНЫ_4500` |
-| 5500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{EMAIL_С_ЗАПИСЯМИ}}&offer=ID_ЦЕНЫ_5500` |
+| 2500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_norecs}}&offer=1a49501b-ff80-40da-8841-de64f310d9b4` |
+| 3500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_wrecs}}&offer=5ba3f4cf-ebd4-428f-b31e-c4ef11acda4a` |
+| 4500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_wrecs}}&offer=111ca105-a35c-457a-a2d0-f2fa543f413e` |
+| 5500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_wrecs}}&offer=87a95f6d-e01c-4ea6-9218-b06becbccd1a` |
 
 Проверка оплаты из бота (ответ `paid` / `unpaid`), например для 2500:
 
 ```
-https://script.google.com/macros/s/AKfycby5bCIbi2CQ4u0z3oeZu0v41c6DdKlhLL_v5SAQE3gINap9evvCjxEX-icPbGEl61jZ/exec?api=check&email={{EMAIL_БЕЗ_ЗАПИСЕЙ}}&offer=ID_ЦЕНЫ_2500&format=text
+https://script.google.com/macros/s/AKfycby5bCIbi2CQ4u0z3oeZu0v41c6DdKlhLL_v5SAQE3gINap9evvCjxEX-icPbGEl61jZ/exec?api=check&email={{email_camp_norecs}}&offer=1a49501b-ff80-40da-8841-de64f310d9b4&format=text
 ```
 
 Без `&offer=…` — проверка оплаты любого тарифа.
