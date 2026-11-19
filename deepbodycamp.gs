@@ -5,10 +5,10 @@
  *  • по ссылке из бота создаёт счёт в Lava на почту человека (лист «Счета»);
  *  • каждые 5 минут (и сразу после возврата человека с оплаты) проверяет счета в Lava;
  *  • оплаченные записывает на лист «Lava.top»: дата, почта, сумма, валюта, статус, тариф;
- *  • на листах тарифов («Без записей 2300», «С записями 3300», «С записями 4300») в столбце E «Оплата»
- *    ставит «Успешно» / «Нет оплаты» (по почте, а если почта другая — по тегу Telegram);
- *  • после оплаты сам запускает в PuzzleBot команду выдачи доступа — свою для каждого тарифа:
- *    2300 → команда «без записей», 3300 и 4300 → команда «с записями».
+ *  • на листах «Без записей» и «С записями» в столбце E «Оплата» ставит «Успешно» / «Нет оплаты»
+ *    (по почте, а если почта другая — по тегу Telegram);
+ *  • после оплаты сам запускает в PuzzleBot команду выдачи доступа:
+ *    2500 → команда «без записей», 3500, 4500 и 5500 → команда «с записями».
  *
  * Настройка — только блок ниже. После вставки: меню «Lava» → «1. Включить автопроверку».
  */
@@ -33,16 +33,20 @@ const PAID_URL = '';
 const PUZZLEBOT_TOKEN = 'ВСТАВЬТЕ_СЮДА_API_ТОКЕН_PUZZLEBOT';
 //    Точные названия команд в PuzzleBot, которые выдают доступ. Вписывайте только в Apps Script,
 //    в GitHub названия команд не храним.
-const COMMAND_NO_REC = 'ВСТАВЬТЕ_КОМАНДУ_БЕЗ_ЗАПИСЕЙ';   // для тарифа 2300
-const COMMAND_REC = 'ВСТАВЬТЕ_КОМАНДУ_С_ЗАПИСЯМИ';       // для тарифов 3300 и 4300
+const COMMAND_NO_REC = 'ВСТАВЬТЕ_КОМАНДУ_БЕЗ_ЗАПИСЕЙ';   // для тарифа 2500
+const COMMAND_REC = 'ВСТАВЬТЕ_КОМАНДУ_С_ЗАПИСЯМИ';       // для тарифов 3500, 4500 и 5500
 
 // 7. Тарифы. offer — ID цены в Lava (меню «Lava» → «Показать продукты и цены Lava»),
-//    sheet — лист регистраций этого тарифа, command — какую команду бота запустить после оплаты.
+//    sheet — лист регистраций этого тарифа (у нескольких тарифов может быть один лист),
+//    command — какую команду бота запустить после оплаты.
 //    Первый тариф — цена по умолчанию, если в ссылке не указан offer.
+const SHEET_NO_REC = 'Без записей';
+const SHEET_REC = 'С записями';
 const TARIFFS = [
-  { name: '2300', offer: '1a49501b-ff80-40da-8841-de64f310d9b4', sheet: 'Без записей 2300', command: COMMAND_NO_REC },
-  { name: '3300', offer: '5ba3f4cf-ebd4-428f-b31e-c4ef11acda4a', sheet: 'С записями 3300', command: COMMAND_REC },
-  { name: '4300', offer: '111ca105-a35c-457a-a2d0-f2fa543f413e', sheet: 'С записями 4300', command: COMMAND_REC },
+  { name: '2500', offer: 'ВСТАВЬТЕ_ID_ЦЕНЫ_2500', sheet: SHEET_NO_REC, command: COMMAND_NO_REC },
+  { name: '3500', offer: 'ВСТАВЬТЕ_ID_ЦЕНЫ_3500', sheet: SHEET_REC, command: COMMAND_REC },
+  { name: '4500', offer: 'ВСТАВЬТЕ_ID_ЦЕНЫ_4500', sheet: SHEET_REC, command: COMMAND_REC },
+  { name: '5500', offer: 'ВСТАВЬТЕ_ID_ЦЕНЫ_5500', sheet: SHEET_REC, command: COMMAND_REC },
 ];
 const DEFAULT_OFFER_ID = TARIFFS[0].offer;
 
@@ -457,18 +461,18 @@ function testBotCommand() {
 }
 
 
-// ---------------------------------------------------------------- столбец «Оплата» на листах тарифов
+// ---------------------------------------------------------------- столбец «Оплата» на листах регистраций
 
 /**
- * На каждом листе тарифа напротив регистрации ставит:
- *   «Успешно» — оплачен этот тариф;
- *   «Оплачен другой тариф: 3300» — человек оплатил, но другой тариф;
+ * На листах «Без записей» и «С записями» напротив регистрации ставит:
+ *   «Успешно» — оплачен любой тариф этого листа;
+ *   «Оплачен другой тариф: 2500» — человек оплатил, но тариф с другого листа;
  *   «Нет оплаты» — оплат нет.
  * Оплата с неизвестным тарифом (пришла не через бота) засчитывается на любом листе.
  */
 function updatePayColumn() {
   const ss = SpreadsheetApp.getActive();
-  // кто что оплатил: email/тег → { '2300': true, ..., '?': true }
+  // кто что оплатил: email/тег → { '2500': true, ..., '?': true }
   const byEmail = {};
   const byTag = {};
   const add = function (map, k, name) { if (k) (map[k] = map[k] || {})[name || '?'] = true; };
@@ -482,8 +486,10 @@ function updatePayColumn() {
     });
   }
 
-  TARIFFS.forEach(function (t) {
-    const reg = ss.getSheetByName(t.sheet);
+  const sheetNames = [];
+  TARIFFS.forEach(function (t) { if (sheetNames.indexOf(t.sheet) < 0) sheetNames.push(t.sheet); });
+  sheetNames.forEach(function (sheetName) {
+    const reg = ss.getSheetByName(sheetName);
     if (!reg) return;
     if (reg.getRange(1, REG_PAY_COL).getValue() !== REG_PAY_HEADER) {
       reg.getRange(1, REG_PAY_COL).setValue(REG_PAY_HEADER).setFontWeight('bold');
@@ -499,8 +505,17 @@ function updatePayColumn() {
       let v = '';
       if (email || tag) {
         const paid = Object.assign({}, (email && byEmail[email]) || {}, (tag && byTag[tag]) || {});
-        const others = Object.keys(paid).filter(function (n) { return n !== t.name && n !== '?'; });
-        if (paid[t.name] || paid['?']) v = PAY_YES;
+        const names = Object.keys(paid);
+        const here = names.some(function (n) {
+          if (n === '?') return true;
+          const t = tariffByName(n);
+          return t && t.sheet === sheetName;
+        });
+        const others = names.filter(function (n) {
+          const t = tariffByName(n);
+          return t && t.sheet !== sheetName;
+        });
+        if (here) v = PAY_YES;
         else if (others.length) v = PAY_OTHER + others.join(', ');
         else v = PAY_NO;
       }
