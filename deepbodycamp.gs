@@ -16,8 +16,9 @@
 // 1. API-ключ Lava (Lava → Интеграции → API → API key).
 const LAVA_API_KEY = 'ВСТАВЬТЕ_СЮДА_API_KEY_ИЗ_LAVA';
 
-// 2. Любая длинная случайная строка — нужна, только если включите уведомления (вебхук) в Lava:
-//    адрес вебхука будет …/exec?key=ЭТА_СТРОКА. Без вебхука всё тоже работает.
+// 2. Секретное слово для уведомлений (вебхука) Lava: любая длинная случайная строка из латинских букв и цифр.
+//    Адрес вебхука в Lava: …/exec?key=ЭТА_СТРОКА. С вебхуком Lava сама сразу сообщает об оплате,
+//    без него скрипт находит оплаты проверками по расписанию (медленнее). В GitHub строку не храним.
 const SECRET = 'ВСТАВЬТЕ_СЮДА_СЛУЧАЙНУЮ_СТРОКУ';
 
 // 3. Страница оплаты (папка docs, GitHub Pages)
@@ -73,6 +74,12 @@ const PAY_HEADER = ['Создан', 'Telegram ID', 'Почта', 'Оффер', '
                     'Telegram ID (число)', 'Команда в боте'];
 const P_TID = 11, P_SENT = 12;   // номера колонок листа «Счета»
 
+// Как часто перепроверять неоплаченные счета (вебхук сообщает об оплатах сразу, проверки — страховка)
+const FRESH_AGE = 60 * 60 * 1000;            // счета младше часа — при каждой проверке (раз в 5 минут)
+const OLD_CHECK_EVERY = 3 * 60 * 60 * 1000;  // более старые — раз в 3 часа
+const INVOICE_TTL = 3 * 24 * 3600 * 1000;    // через 3 дня неоплаченный счёт считаем истёкшим
+const FETCH_BATCH = 20;                      // сколько счетов спрашивать у Lava одновременно
+
 
 /** Тариф по ID цены Lava (или null). */
 function tariffByOffer(offerId) {
@@ -114,10 +121,15 @@ function install() {
 }
 
 /** Запускается по расписанию: проверяет счета и обновляет столбец «Оплата». */
-function tick() {
+function tick(full) {
   let paid = 0;
   try {
-    paid = syncInvoices();
+    // Счета младше часа проверяем каждые 5 минут, старые — раз в 3 часа (или по кнопке в меню)
+    const props = PropertiesService.getScriptProperties();
+    const lastFull = Number(props.getProperty('lastFullCheck')) || 0;
+    if (full !== true) full = Date.now() - lastFull > OLD_CHECK_EVERY;
+    if (full) props.setProperty('lastFullCheck', String(Date.now()));
+    paid = syncInvoices('', full);
   } finally {
     updatePayColumn();
     deliverAccess();
@@ -126,7 +138,7 @@ function tick() {
 }
 
 function checkNow() {
-  const paid = tick();
+  const paid = tick(true);
   SpreadsheetApp.getUi().alert('Проверено. Новых оплат: ' + paid);
 }
 
@@ -254,6 +266,8 @@ function getOrCreateInvoice(email, uid, offerId, currency, promo, tid) {
   }
   const sheet = paySheet();
   const lock = LockService.getScriptLock();
+
+  // 1. Есть ли у человека свежий неоплаченный счёт с теми же параметрами — тогда отдаём его
   lock.waitLock(25000);
   try {
     const last = sheet.getLastRow();
@@ -269,41 +283,51 @@ function getOrCreateInvoice(email, uid, offerId, currency, promo, tid) {
         }
       }
     }
-
-    const res = UrlFetchApp.fetch('https://gate.lava.top/api/v3/invoice', {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { 'X-Api-Key': LAVA_API_KEY, Accept: 'application/json' },
-      payload: JSON.stringify(Object.assign({
-        email: email,
-        offerId: offerId,
-        currency: currency,
-        buyerLanguage: 'RU',
-        clientUtm: { utm_source: 'puzzlebot', utm_content: uid },
-      }, promo ? { promoCode: promo } : {}, returnUrls(email, uid, offerId))),
-      muteHttpExceptions: true,
-    });
-    const code = res.getResponseCode();
-    const text = res.getContentText();
-    if (code !== 200 && code !== 201) {
-      throw new Error('Lava ответила кодом ' + code + ': ' + text.slice(0, 300));
-    }
-    const data = JSON.parse(text);
-    if (!data.paymentUrl) throw new Error('Lava не вернула ссылку на оплату: ' + text.slice(0, 300));
-    const money = data.amountTotal || {};
-    sheet.appendRow([new Date(), uid, email, offerId, Number(money.amount) || '', String(money.currency || currency),
-                     data.id, 'ожидает оплаты', data.paymentUrl, promo, tid ? "'" + tid : '', '']);
-    return { id: data.id, paymentUrl: data.paymentUrl };
   } finally {
     lock.releaseLock();
   }
+
+  // 2. Создаём счёт в Lava — без блокировки, чтобы люди не ждали друг друга
+  const res = UrlFetchApp.fetch('https://gate.lava.top/api/v3/invoice', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'X-Api-Key': LAVA_API_KEY, Accept: 'application/json' },
+    payload: JSON.stringify(Object.assign({
+      email: email,
+      offerId: offerId,
+      currency: currency,
+      buyerLanguage: 'RU',
+      clientUtm: { utm_source: 'puzzlebot', utm_content: uid },
+    }, promo ? { promoCode: promo } : {}, returnUrls(email, uid, offerId))),
+    muteHttpExceptions: true,
+  });
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+  if (code !== 200 && code !== 201) {
+    throw new Error('Lava ответила кодом ' + code + ': ' + text.slice(0, 300));
+  }
+  const data = JSON.parse(text);
+  if (!data.paymentUrl) throw new Error('Lava не вернула ссылку на оплату: ' + text.slice(0, 300));
+  const money = data.amountTotal || {};
+
+  // 3. Записываем счёт в таблицу (короткая блокировка только на запись)
+  lock.waitLock(25000);
+  try {
+    sheet.appendRow([new Date(), uid, email, offerId, Number(money.amount) || '', String(money.currency || currency),
+                     data.id, 'ожидает оплаты', data.paymentUrl, promo, tid ? "'" + tid : '', '']);
+  } finally {
+    lock.releaseLock();
+  }
+  return { id: data.id, paymentUrl: data.paymentUrl };
 }
 
 /**
- * Проверить в Lava статус неоплаченных счетов из листа «Счета» (за последние 3 дня)
- * и записать оплаченные на лист «Lava.top». Возвращает число новых оплат.
+ * Проверить в Lava статус неоплаченных счетов из листа «Счета» и записать оплаченные на лист «Lava.top».
+ *   onlyEmail — проверить только счета этой почты (любого возраста);
+ *   full      — проверить и старые счета (старше часа), иначе только свежие.
+ * Счета спрашиваем у Lava пачками по FETCH_BATCH одновременно. Возвращает число новых оплат.
  */
-function syncInvoices(onlyEmail) {
+function syncInvoices(onlyEmail, full) {
   if (typeof onlyEmail !== 'string') onlyEmail = '';
   const sheet = paySheet();
   const last = sheet.getLastRow();
@@ -311,28 +335,51 @@ function syncInvoices(onlyEmail) {
   const rows = sheet.getRange(2, 1, last - 1, PAY_HEADER.length).getValues();
   const paid = [];
   const errors = [];
+  const todo = [];
   rows.forEach(function (r, i) {
     if (r[7] !== 'ожидает оплаты' || !r[6]) return;
     if (onlyEmail && r[2] !== onlyEmail) return;
-    const created = new Date(r[0]).getTime();
-    if (Date.now() - created > 3 * 24 * 3600 * 1000) {
+    const age = Date.now() - new Date(r[0]).getTime();
+    if (age > INVOICE_TTL) {
       sheet.getRange(i + 2, 8).setValue('не оплачен (истёк)');
       return;
     }
-    let inv;
-    try {
-      inv = lavaGet('https://gate.lava.top/api/v1/invoices/' + encodeURIComponent(r[6]));
-    } catch (err) {
-      errors.push(r[6] + ': ' + String(err.message || err).slice(0, 200));
-      return;
-    }
-    const status = String(inv.status || '').toUpperCase();
-    if (status === 'COMPLETED' || status === 'SUBSCRIPTION-ACTIVE' || status === 'SUBSCRIPTION_ACTIVE') {
-      paid.push({ row: i + 2, r: r, inv: inv });
-    } else if (status === 'FAILED') {
-      sheet.getRange(i + 2, 8).setValue('не оплачен');
-    }
+    if (!onlyEmail && !full && age > FRESH_AGE) return;
+    todo.push({ row: i + 2, r: r });
   });
+
+  for (let b = 0; b < todo.length; b += FETCH_BATCH) {
+    const batch = todo.slice(b, b + FETCH_BATCH);
+    let responses;
+    try {
+      responses = UrlFetchApp.fetchAll(batch.map(function (x) {
+        return {
+          url: 'https://gate.lava.top/api/v1/invoices/' + encodeURIComponent(x.r[6]),
+          headers: { 'X-Api-Key': LAVA_API_KEY, Accept: 'application/json' },
+          muteHttpExceptions: true,
+        };
+      }));
+    } catch (err) {
+      errors.push('пачка счетов: ' + String(err.message || err).slice(0, 200));
+      continue;
+    }
+    batch.forEach(function (x, k) {
+      const res = responses[k];
+      const code = res.getResponseCode();
+      if (code !== 200) {
+        errors.push(x.r[6] + ': Lava ответила кодом ' + code + ': ' + res.getContentText().slice(0, 150));
+        return;
+      }
+      let inv;
+      try { inv = JSON.parse(res.getContentText()); } catch (e) { errors.push(x.r[6] + ': не JSON'); return; }
+      const status = String(inv.status || '').toUpperCase();
+      if (status === 'COMPLETED' || status === 'SUBSCRIPTION-ACTIVE' || status === 'SUBSCRIPTION_ACTIVE') {
+        paid.push({ row: x.row, r: x.r, inv: inv });
+      } else if (status === 'FAILED') {
+        sheet.getRange(x.row, 8).setValue('не оплачен');
+      }
+    });
+  }
 
   if (paid.length) {
     const lock = LockService.getScriptLock();
@@ -559,18 +606,11 @@ function handle(e) {
 
 function savePayment(p) {
   const product = p.product || {};
-  const mine = ownProductIds();
-  // Уведомления приходят по всем продуктам аккаунта — берём только продукт(ы) этого мероприятия
-  if (mine.length && product.id && mine.indexOf(String(product.id)) < 0) {
-    return { status: 'ignored', reason: 'другой продукт' };
-  }
   const sheet = lavaSheet();
   const contractId = String(p.contractId || '');
   const email = normEmail(p.buyer && p.buyer.email);
-  if (contractId && sheet.getRange(1, L_ID, sheet.getMaxRows(), 1).createTextFinder(contractId).matchEntireCell(true).findNext()) {
-    return { status: 'duplicate' };
-  }
-  // Если это оплата счёта из бота — отметим счёт оплаченным и подпишем Telegram
+  // Если это оплата счёта из бота — найдём его на листе «Счета»
+  let payRow = 0;
   let tg = '';
   let tariff = tariffByOffer(p.offer && p.offer.id);
   const pay = paySheet();
@@ -578,13 +618,25 @@ function savePayment(p) {
     const rows = pay.getRange(2, 1, pay.getLastRow() - 1, PAY_HEADER.length).getValues();
     for (let i = 0; i < rows.length; i++) {
       if (String(rows[i][6]) === contractId) {
+        payRow = i + 2;
         tg = rows[i][1];
         tariff = tariffByOffer(rows[i][3]) || tariff;
-        pay.getRange(i + 2, 8).setValue('оплачен');
         break;
       }
     }
   }
+  // Уведомления приходят по всем продуктам аккаунта — берём только счета из бота и продукт(ы) этого мероприятия
+  if (!payRow) {
+    const mine = ownProductIds();
+    if (!product.id || mine.indexOf(String(product.id)) < 0) {
+      return { status: 'ignored', reason: 'другой продукт' };
+    }
+  }
+  if (contractId && sheet.getRange(1, L_ID, sheet.getMaxRows(), 1).createTextFinder(contractId).matchEntireCell(true).findNext()) {
+    if (payRow) pay.getRange(payRow, 8).setValue('оплачен');
+    return { status: 'duplicate' };
+  }
+  if (payRow) pay.getRange(payRow, 8).setValue('оплачен');
   sheet.appendRow([
     new Date(), email, Number(p.amount) || p.amount || '', String(p.currency || '').toUpperCase(), PAID, tg, contractId,
     tariff ? tariff.name : '',
@@ -597,7 +649,7 @@ function markRefund(p) {
   const email = normEmail(d.customer_email);
   const productId = String((d.product && d.product.product_id) || '');
   const mine = ownProductIds();
-  if (mine.length && productId && mine.indexOf(productId) < 0) return { status: 'ignored', reason: 'другой продукт' };
+  if (!productId || mine.indexOf(productId) < 0) return { status: 'ignored', reason: 'другой продукт' };
   const sheet = lavaSheet();
   const last = sheet.getLastRow();
   if (!email || last < 2) return { status: 'ignored' };
