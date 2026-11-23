@@ -215,6 +215,11 @@ function api(p) {
       return { ok: false, error: 'promo', message: 'Промокод может состоять только из латинских букв, цифр, «-» и «_».' };
     }
     const tariffName = (tariffByOffer(offerId) || {}).name || offerId;
+    // Защита от повторной оплаты: если этот человек уже оплатил тариф с тем же доступом — второй счёт не создаём
+    if (alreadyPaid(email, tid, tariffByOffer(offerId))) {
+      writeLog(null, 'PAY', { status: 'already_paid', tariff: tariffName, email: email, uid: uid });
+      return { ok: false, error: 'paid', message: PAID_MESSAGE };
+    }
     try {
       const inv = getOrCreateInvoice(email, uid, offerId, currency, promo, tid);
       writeLog(null, 'PAY', { status: 'redirect', tariff: tariffName, email: email, uid: uid, promo: promo, invoice: inv.id });
@@ -225,6 +230,7 @@ function api(p) {
       if (promo && / 400: /.test(msg)) {
         return { ok: false, error: 'promo', message: 'Промокод не подошёл. Проверьте его или оплатите без промокода.' };
       }
+      if (err.alreadyPaid) return { ok: false, error: 'paid', message: PAID_MESSAGE };
       if (err.lavaDown) {
         return { ok: false, error: 'unavailable', message: 'Платёжная система временно недоступна. Попробуйте ещё раз через несколько минут.' };
       }
@@ -232,6 +238,27 @@ function api(p) {
     }
   }
   return { ok: false, error: 'unknown' };
+}
+
+const PAID_MESSAGE = 'Вы уже оплатили этот тариф. Доступ отправлен вам в бот и на почту — повторно платить не нужно.';
+
+/** Оплатил ли человек (по почте или числовому Telegram ID) тариф с той же командой доступа. */
+function alreadyPaid(email, tid, tariff) {
+  if (!tariff) return false;
+  const same = function (t) { return t && t.command === tariff.command; };
+  const lava = lavaSheet();
+  if (lava.getLastRow() > 1) {
+    const hit = lava.getRange(2, 1, lava.getLastRow() - 1, LAVA_HEADER.length).getValues().some(function (r) {
+      return r[L_STATUS - 1] === PAID && normEmail(r[1]) === email && same(tariffByName(r[L_TARIFF - 1]));
+    });
+    if (hit) return true;
+  }
+  if (!tid) return false;
+  const pay = paySheet();
+  if (pay.getLastRow() < 2) return false;
+  return pay.getRange(2, 1, pay.getLastRow() - 1, PAY_HEADER.length).getValues().some(function (r) {
+    return r[7] === 'оплачен' && String(r[P_TID - 1] || '').replace(/^'/, '') === tid && same(tariffByOffer(r[3]));
+  });
 }
 
 function hasPaidInvoice(email, tariff) {
@@ -275,6 +302,7 @@ function getOrCreateInvoice(email, uid, offerId, currency, promo, tid) {
   const lock = LockService.getScriptLock();
 
   // 1. Есть ли у человека свежий неоплаченный счёт с теми же параметрами — тогда отдаём его
+  let reuse = null;
   lock.waitLock(25000);
   try {
     const last = sheet.getLastRow();
@@ -286,12 +314,29 @@ function getOrCreateInvoice(email, uid, offerId, currency, promo, tid) {
         if (fresh && r[2] === email && String(r[1]) === uid && r[3] === offerId && r[5] === currency &&
             r[7] === 'ожидает оплаты' && r[8] && String(r[9] || '') === promo) {
           if (tid && !r[P_TID - 1]) sheet.getRange(i + 2, P_TID).setValue("'" + tid);
-          return { id: r[6], paymentUrl: r[8] };
+          reuse = { row: i + 2, id: r[6], paymentUrl: r[8] };
+          break;
         }
       }
     }
   } finally {
     lock.releaseLock();
+  }
+  if (reuse) {
+    // Старый счёт отдаём, только если по нему ещё можно платить: после отказа банка Lava его закрывает,
+    // и человек снова попадал бы на неработающую оплату
+    let status = '';
+    try { status = String(lavaGet('https://gate.lava.top/api/v1/invoices/' + encodeURIComponent(reuse.id)).status || '').toUpperCase(); }
+    catch (err) { status = ''; }   // Lava не ответила — отдаём старый счёт, как раньше
+    if (status === 'COMPLETED' || status === 'SUBSCRIPTION-ACTIVE' || status === 'SUBSCRIPTION_ACTIVE') {
+      const e = new Error('счёт ' + reuse.id + ' уже оплачен');
+      e.alreadyPaid = true;
+      throw e;
+    }
+    if (!status || status === 'NEW' || status === 'IN-PROGRESS' || status === 'IN_PROGRESS') {
+      return { id: reuse.id, paymentUrl: reuse.paymentUrl };
+    }
+    sheet.getRange(reuse.row, 8).setValue('не оплачен');   // FAILED / CANCELLED и т. п. — создаём новый счёт
   }
 
   // 2. Создаём счёт в Lava — без блокировки, чтобы люди не ждали друг друга.
