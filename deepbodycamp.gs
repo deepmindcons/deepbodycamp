@@ -80,6 +80,7 @@ const FRESH_AGE = 60 * 60 * 1000;            // счета младше часа
 const OLD_CHECK_EVERY = 3 * 60 * 60 * 1000;  // более старые — раз в 3 часа
 const INVOICE_TTL = 3 * 24 * 3600 * 1000;    // через 3 дня неоплаченный счёт считаем истёкшим
 const FETCH_BATCH = 20;                      // сколько счетов спрашивать у Lava одновременно
+const LAVA_TRIES = 3;                        // попыток создать счёт, если Lava временно сбоит
 
 
 /** Тариф по ID цены Lava (или null). */
@@ -213,17 +214,21 @@ function api(p) {
     if (promo && !/^[A-Z0-9_-]{3,36}$/.test(promo)) {
       return { ok: false, error: 'promo', message: 'Промокод может состоять только из латинских букв, цифр, «-» и «_».' };
     }
+    const tariffName = (tariffByOffer(offerId) || {}).name || offerId;
     try {
       const inv = getOrCreateInvoice(email, uid, offerId, currency, promo, tid);
-      writeLog(null, 'PAY', { status: 'redirect', email: email, uid: uid, promo: promo, invoice: inv.id });
+      writeLog(null, 'PAY', { status: 'redirect', tariff: tariffName, email: email, uid: uid, promo: promo, invoice: inv.id });
       return { ok: true, paymentUrl: inv.paymentUrl };
     } catch (err) {
       const msg = String(err.message || err);
-      writeLog(null, 'PAY', { status: 'error', email: email, uid: uid, promo: promo, error: msg });
+      writeLog(null, 'PAY', { status: 'error', tariff: tariffName, email: email, uid: uid, promo: promo, error: msg });
       if (promo && / 400: /.test(msg)) {
         return { ok: false, error: 'promo', message: 'Промокод не подошёл. Проверьте его или оплатите без промокода.' };
       }
-      return { ok: false, error: 'failed', message: 'Не получилось создать оплату. Попробуйте ещё раз через минуту или напишите нам в боте.' };
+      if (err.lavaDown) {
+        return { ok: false, error: 'unavailable', message: 'Платёжная система временно недоступна. Попробуйте ещё раз через несколько минут.' };
+      }
+      return { ok: false, error: 'failed', message: 'Не получилось создать оплату. Попробуйте ещё раз.' };
     }
   }
   return { ok: false, error: 'unknown' };
@@ -289,8 +294,9 @@ function getOrCreateInvoice(email, uid, offerId, currency, promo, tid) {
     lock.releaseLock();
   }
 
-  // 2. Создаём счёт в Lava — без блокировки, чтобы люди не ждали друг друга
-  const res = UrlFetchApp.fetch('https://gate.lava.top/api/v3/invoice', {
+  // 2. Создаём счёт в Lava — без блокировки, чтобы люди не ждали друг друга.
+  //    Если Lava временно сбоит (ошибка 5xx или нет связи), повторяем запрос ещё 2 раза с паузой.
+  const request = {
     method: 'post',
     contentType: 'application/json',
     headers: { 'X-Api-Key': LAVA_API_KEY, Accept: 'application/json' },
@@ -302,11 +308,25 @@ function getOrCreateInvoice(email, uid, offerId, currency, promo, tid) {
       clientUtm: { utm_source: 'puzzlebot', utm_content: uid },
     }, promo ? { promoCode: promo } : {}, returnUrls(email, uid, offerId))),
     muteHttpExceptions: true,
-  });
-  const code = res.getResponseCode();
-  const text = res.getContentText();
+  };
+  let code = 0, text = '';
+  for (let attempt = 1; attempt <= LAVA_TRIES; attempt++) {
+    try {
+      const res = UrlFetchApp.fetch('https://gate.lava.top/api/v3/invoice', request);
+      code = res.getResponseCode();
+      text = res.getContentText();
+    } catch (err) {
+      code = 0;
+      text = 'нет связи с Lava: ' + String(err.message || err);
+    }
+    if (code !== 0 && code < 500) break;
+    if (attempt < LAVA_TRIES) Utilities.sleep(2000 * attempt);
+  }
   if (code !== 200 && code !== 201) {
-    throw new Error('Lava ответила кодом ' + code + ': ' + text.slice(0, 300));
+    const e = new Error('Lava ответила кодом ' + code + ': ' + text.slice(0, 300) +
+                        (code === 0 || code >= 500 ? ' (после ' + LAVA_TRIES + ' попыток)' : ''));
+    e.lavaDown = code === 0 || code >= 500;
+    throw e;
   }
   const data = JSON.parse(text);
   if (!data.paymentUrl) throw new Error('Lava не вернула ссылку на оплату: ' + text.slice(0, 300));
