@@ -80,6 +80,7 @@ const FRESH_AGE = 60 * 60 * 1000;            // счета младше часа
 const OLD_CHECK_EVERY = 3 * 60 * 60 * 1000;  // более старые — раз в 3 часа
 const INVOICE_TTL = 3 * 24 * 3600 * 1000;    // через 3 дня неоплаченный счёт считаем истёкшим
 const FETCH_BATCH = 20;                      // сколько счетов спрашивать у Lava одновременно
+const PRICES_REFRESH_EVERY = 30 * 60 * 1000;  // как часто обновлять цены тарифов из Lava
 const LAVA_TRIES = 3;                        // попыток создать счёт, если Lava временно сбоит
 
 
@@ -126,6 +127,16 @@ function install() {
 /** Запускается по расписанию: проверяет счета и обновляет столбец «Оплата». */
 function tick(full) {
   let paid = 0;
+  // Цены тарифов держим в кэше свежими, чтобы страница оплаты открывалась быстро
+  try {
+    const props = PropertiesService.getScriptProperties();
+    if (Date.now() - (Number(props.getProperty('lastPrices')) || 0) > PRICES_REFRESH_EVERY) {
+      refreshPrices();
+      props.setProperty('lastPrices', String(Date.now()));
+    }
+  } catch (err) {
+    writeLog(null, 'PAY', { status: 'prices_error', error: String(err.message || err) });
+  }
   try {
     // Счета младше часа проверяем каждые 5 минут, старые — раз в 3 часа (или по кнопке в меню)
     const props = PropertiesService.getScriptProperties();
@@ -757,18 +768,32 @@ function lavaOffers() {
 
 /** Цены оффера в разных валютах: [{currency, amount}]. Кэш на 10 минут. */
 function offerPrices(offerId) {
-  const cache = CacheService.getScriptCache();
-  const hit = cache.get('prices_' + offerId);
+  const hit = CacheService.getScriptCache().get('prices_' + offerId);
   if (hit) return JSON.parse(hit);
   let prices = [];
   try {
-    lavaOffers().forEach(function (o) { if (o.offerId === offerId) prices = o.prices; });
+    prices = refreshPrices()[offerId] || [];
   } catch (err) {
     writeLog(null, 'PAY', { status: 'prices_error', error: String(err.message || err) });
   }
   if (!prices.length) return [{ currency: 'RUB' }, { currency: 'USD' }, { currency: 'EUR' }];
-  cache.put('prices_' + offerId, JSON.stringify(prices), 600);
   return prices;
+}
+
+/**
+ * Загрузить из Lava цены всех тарифов и сохранить в кэш на 6 часов. Вызывается по расписанию раз в
+ * PRICES_REFRESH_EVERY, поэтому страница оплаты получает цены из кэша мгновенно, не дожидаясь Lava.
+ * Возвращает { offerId: [{currency, amount}] }.
+ */
+function refreshPrices() {
+  const cache = CacheService.getScriptCache();
+  const out = {};
+  lavaOffers().forEach(function (o) {
+    if (!tariffByOffer(o.offerId) || !o.prices.length) return;
+    out[o.offerId] = o.prices;
+    cache.put('prices_' + o.offerId, JSON.stringify(o.prices), 21600);
+  });
+  return out;
 }
 
 /** ID продуктов Lava, к которым относятся цены из TARIFFS ([] — если узнать не удалось). Кэш на 6 часов. */
