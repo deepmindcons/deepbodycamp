@@ -12,8 +12,8 @@
 3. Страница просит скрипт создать счёт в Lava на почту человека и переводит на оплату.
 4. После оплаты Lava возвращает на страницу «Оплата прошла успешно».
 5. Скрипт пишет оплату на лист «Lava.top» (с тарифом) и запускает в боте команду выдачи доступа:
-   2500 → `COMMAND_NO_REC`, 3500, 4500 и 5500 → `COMMAND_REC`.
-6. На листах «Без записей» (2500) и «С записями» (3500, 4500, 5500) в столбце E «Оплата» ставит:
+   2900 → `COMMAND_NO_REC`, 3900, 4900 и 5900 → `COMMAND_REC`.
+6. На листах «Без записей» (2900) и «С записями» (3900, 4900, 5900) в столбце E «Оплата» ставит:
    «Успешно» — оплачен тариф этого листа, «Оплачен другой тариф: …», «Нет оплаты».
 7. Лист «Итоги» считается формулами таблицы, скрипт его не трогает.
    Раз в 5 минут скрипт сам перепроверяет неоплаченные счета.
@@ -44,12 +44,12 @@
 
 | Тариф | Ссылка |
 |---|---|
-| 2500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_norecs}}&offer=1a49501b-ff80-40da-8841-de64f310d9b4` |
-| 3500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_wrecs}}&offer=5ba3f4cf-ebd4-428f-b31e-c4ef11acda4a` |
-| 4500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_wrecs}}&offer=111ca105-a35c-457a-a2d0-f2fa543f413e` |
-| 5500 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_wrecs}}&offer=87a95f6d-e01c-4ea6-9218-b06becbccd1a` |
+| 2900 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_norecs}}&offer=1a49501b-ff80-40da-8841-de64f310d9b4` |
+| 3900 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_wrecs}}&offer=5ba3f4cf-ebd4-428f-b31e-c4ef11acda4a` |
+| 4900 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_wrecs}}&offer=111ca105-a35c-457a-a2d0-f2fa543f413e` |
+| 5900 ₽ | `https://deepmindcons.github.io/deepbodycamp/?uid={{USERNAME_TEXT}}&tid={{USER_ID_TEXT}}&email={{email_camp_wrecs}}&offer=87a95f6d-e01c-4ea6-9218-b06becbccd1a` |
 
-Проверка оплаты из бота (ответ `paid` / `unpaid`), например для 2500:
+Проверка оплаты из бота (ответ `paid` / `unpaid`), например для 2900:
 
 ```
 https://script.google.com/macros/s/AKfycby5bCIbi2CQ4u0z3oeZu0v41c6DdKlhLL_v5SAQE3gINap9evvCjxEX-icPbGEl61jZ/exec?api=check&email={{email_camp_norecs}}&offer=1a49501b-ff80-40da-8841-de64f310d9b4&format=text

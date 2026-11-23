@@ -8,7 +8,7 @@
  *  • на листах «Без записей» и «С записями» в столбце E «Оплата» ставит «Успешно» / «Нет оплаты»
  *    (по почте, а если почта другая — по тегу Telegram);
  *  • после оплаты сам запускает в PuzzleBot команду выдачи доступа:
- *    2500 → команда «без записей», 3500, 4500 и 5500 → команда «с записями».
+ *    2900 → команда «без записей», 3900, 4900 и 5900 → команда «с записями».
  *
  * Настройка — только блок ниже. После вставки: меню «Lava» → «1. Включить автопроверку».
  */
@@ -34,20 +34,21 @@ const PAID_URL = '';
 const PUZZLEBOT_TOKEN = 'ВСТАВЬТЕ_СЮДА_API_ТОКЕН_PUZZLEBOT';
 //    Точные названия команд в PuzzleBot, которые выдают доступ. Вписывайте только в Apps Script,
 //    в GitHub названия команд не храним.
-const COMMAND_NO_REC = 'ВСТАВЬТЕ_КОМАНДУ_БЕЗ_ЗАПИСЕЙ';   // для тарифа 2500
-const COMMAND_REC = 'ВСТАВЬТЕ_КОМАНДУ_С_ЗАПИСЯМИ';       // для тарифов 3500, 4500 и 5500
+const COMMAND_NO_REC = 'ВСТАВЬТЕ_КОМАНДУ_БЕЗ_ЗАПИСЕЙ';   // для тарифа 2900
+const COMMAND_REC = 'ВСТАВЬТЕ_КОМАНДУ_С_ЗАПИСЯМИ';       // для тарифов 3900, 4900 и 5900
 
 // 7. Тарифы. offer — ID цены в Lava (меню «Lava» → «Показать продукты и цены Lava»),
 //    sheet — лист регистраций этого тарифа (у нескольких тарифов может быть один лист),
 //    command — какую команду бота запустить после оплаты.
+//    was — прежние названия (цены) тарифа: оплаты по старой цене засчитываются на тот же лист.
 //    Первый тариф — цена по умолчанию, если в ссылке не указан offer.
 const SHEET_NO_REC = 'Без записей';
 const SHEET_REC = 'С записями';
 const TARIFFS = [
-  { name: '2500', offer: '1a49501b-ff80-40da-8841-de64f310d9b4', sheet: SHEET_NO_REC, command: COMMAND_NO_REC },
-  { name: '3500', offer: '5ba3f4cf-ebd4-428f-b31e-c4ef11acda4a', sheet: SHEET_REC, command: COMMAND_REC },
-  { name: '4500', offer: '111ca105-a35c-457a-a2d0-f2fa543f413e', sheet: SHEET_REC, command: COMMAND_REC },
-  { name: '5500', offer: '87a95f6d-e01c-4ea6-9218-b06becbccd1a', sheet: SHEET_REC, command: COMMAND_REC },
+  { name: '2900', offer: '1a49501b-ff80-40da-8841-de64f310d9b4', sheet: SHEET_NO_REC, command: COMMAND_NO_REC, was: ['2500'] },
+  { name: '3900', offer: '5ba3f4cf-ebd4-428f-b31e-c4ef11acda4a', sheet: SHEET_REC, command: COMMAND_REC, was: ['3500'] },
+  { name: '4900', offer: '111ca105-a35c-457a-a2d0-f2fa543f413e', sheet: SHEET_REC, command: COMMAND_REC, was: ['4500'] },
+  { name: '5900', offer: '87a95f6d-e01c-4ea6-9218-b06becbccd1a', sheet: SHEET_REC, command: COMMAND_REC, was: ['5500'] },
 ];
 const DEFAULT_OFFER_ID = TARIFFS[0].offer;
 
@@ -92,6 +93,7 @@ function tariffByOffer(offerId) {
 function tariffByName(name) {
   name = String(name || '').trim();
   for (let i = 0; i < TARIFFS.length; i++) if (TARIFFS[i].name === name) return TARIFFS[i];
+  for (let i = 0; i < TARIFFS.length; i++) if ((TARIFFS[i].was || []).indexOf(name) >= 0) return TARIFFS[i];
   return null;
 }
 
@@ -234,7 +236,7 @@ function hasPaidInvoice(email, tariff) {
   return lava.getRange(2, 1, last - 1, LAVA_HEADER.length).getValues()
     .some(function (r) {
       return normEmail(r[1]) === email && r[L_STATUS - 1] === PAID &&
-             (!tariff || String(r[L_TARIFF - 1]) === tariff.name);
+             (!tariff || tariffByName(r[L_TARIFF - 1]) === tariff);
     });
 }
 
@@ -513,13 +515,13 @@ function testBotCommand() {
 /**
  * На листах «Без записей» и «С записями» напротив регистрации ставит:
  *   «Успешно» — оплачен любой тариф этого листа;
- *   «Оплачен другой тариф: 2500» — человек оплатил, но тариф с другого листа;
+ *   «Оплачен другой тариф: 2900» — человек оплатил, но тариф с другого листа;
  *   «Нет оплаты» — оплат нет.
  * Оплата с неизвестным тарифом (пришла не через бота) засчитывается на любом листе.
  */
 function updatePayColumn() {
   const ss = SpreadsheetApp.getActive();
-  // кто что оплатил: email/тег → { '2500': true, ..., '?': true }
+  // кто что оплатил: email/тег → { '2900': true, ..., '?': true }
   const byEmail = {};
   const byTag = {};
   const add = function (map, k, name) { if (k) (map[k] = map[k] || {})[name || '?'] = true; };
