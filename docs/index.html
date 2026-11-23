@@ -119,16 +119,24 @@ function showForm(error) {
   $('pay').hidden = false;
   $('mail').textContent = 'Почта: ' + email;
   setError(error);
+  // Пока цены грузятся из Lava, показываем заглушки. Сохранённые в браузере цены — только запасной
+  // вариант, если Lava не ответила (иначе после смены цен мелькали бы старые суммы).
   var cached = store('prices_' + offer);
-  if (cached) { try { renderPrices(JSON.parse(cached)); } catch (e) {} }
+  function fallback() {
+    var list = null;
+    if (cached) { try { list = JSON.parse(cached); } catch (e) {} }
+    renderPrices(list && list.length ? list : [{ currency: 'RUB' }]);
+  }
   api({ api: 'prices', offer: offer }).then(function (d) {
-    if (d && d.ok && d.prices && d.prices.length) {
+    var withSums = d && d.ok && d.prices && d.prices.length &&
+      d.prices.every(function (p) { return p.amount != null && p.amount !== ''; });
+    if (withSums) {
       store('prices_' + offer, JSON.stringify(d.prices));
       renderPrices(d.prices);
-    } else if (!cached) {
-      renderPrices([{ currency: 'RUB' }]);
+    } else {
+      fallback();
     }
-  }, function () { if (!cached) renderPrices([{ currency: 'RUB' }]); });
+  }, fallback);
 
   $('pay').addEventListener('submit', function (ev) {
     ev.preventDefault();
