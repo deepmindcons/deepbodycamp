@@ -287,9 +287,11 @@ function hasPaidInvoice(email, tariff) {
 // ---------------------------------------------------------------- счета
 
 /** Куда Lava вернёт покупателя после оплаты / ошибки / отмены. */
-function returnUrls(email, uid, offerId) {
+function returnUrls(email, uid, offerId, tid) {
+  // tid обязательно передаём дальше: если оплата не прошла и человек повторяет её со страницы возврата,
+  // новый счёт должен знать его Telegram ID, иначе после оплаты некому отправить доступ
   const q = 'email=' + encodeURIComponent(email) + '&uid=' + encodeURIComponent(uid) +
-            '&offer=' + encodeURIComponent(offerId);
+            '&offer=' + encodeURIComponent(offerId) + (tid ? '&tid=' + encodeURIComponent(tid) : '');
   const urls = {};
   if (PAY_PAGE_URL) {
     const base = PAY_PAGE_URL.replace(/[?#].*$/, '');
@@ -362,7 +364,7 @@ function getOrCreateInvoice(email, uid, offerId, currency, promo, tid) {
       currency: currency,
       buyerLanguage: 'RU',
       clientUtm: { utm_source: 'puzzlebot', utm_content: uid },
-    }, promo ? { promoCode: promo } : {}, returnUrls(email, uid, offerId))),
+    }, promo ? { promoCode: promo } : {}, returnUrls(email, uid, offerId, tid))),
     muteHttpExceptions: true,
   };
   let code = 0, text = '';
@@ -521,8 +523,21 @@ function deliverAccess() {
       const tid = String(r[P_TID - 1] || '').replace(/^'/, '');
       if (t && String(r[P_SENT - 1]).indexOf('отправлено') === 0) done[key(tid, t.command)] = true;
     });
-    rows.forEach(function (r, i) {
+    // Если у оплаченного счёта нет Telegram ID — берём его из других счетов этого же человека (по почте или тегу)
+    const tidByEmail = {}, tidByUid = {};
+    rows.forEach(function (r) {
       const tid = String(r[P_TID - 1] || '').replace(/^'/, '');
+      if (!/^\d+$/.test(tid)) return;
+      if (r[2]) tidByEmail[normEmail(r[2])] = tid;
+      const u = normTag(r[1]);
+      if (u) tidByUid[u] = tid;
+    });
+    rows.forEach(function (r, i) {
+      let tid = String(r[P_TID - 1] || '').replace(/^'/, '');
+      if (!/^\d+$/.test(tid) && r[7] === 'оплачен') {
+        tid = tidByEmail[normEmail(r[2])] || tidByUid[normTag(r[1])] || '';
+        if (tid) sheet.getRange(i + 2, P_TID).setValue("'" + tid);
+      }
       const mark = String(r[P_SENT - 1] || '');
       if (r[7] !== 'оплачен' || !/^\d+$/.test(tid) || mark.indexOf('отправлено') === 0) return;
       const tries = (mark.match(/^ошибка (\d)/) || [])[1] | 0;
